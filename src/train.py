@@ -60,7 +60,7 @@ from transformers import TrainingArguments
 def formatting_func(examples):
     to_apply_template = [
         {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": examples["instruction"] + ("\n\nInput: " + examples["input"] if examples["input"].strip() != "" else "")},
+        {"role": "user", "content": examples["instruction"] + ("\n\nInput: " + examples["input"] if examples["input"] and examples["input"].strip() != "" else "")},
         {"role": "assistant", "content": examples["output_upper"]},
     ]
 
