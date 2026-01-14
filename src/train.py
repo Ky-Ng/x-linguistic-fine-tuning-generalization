@@ -6,9 +6,12 @@ import torch
 # %%
 train_ds = load_dataset("kylelovesllms/alpaca-with-text-upper", split="train") 
 test_ds = load_dataset("kylelovesllms/alpaca-cleaned-de-upper", split="train")
-# dataset_split = ds["train"].train_test_split(test_size=0.2, seed=42)
-# train_ds = dataset_split["train"]
-# test_ds = dataset_split["test"]
+
+train_dataset_split = train_ds.train_test_split(train_size=0.8, seed=42)
+train_ds = train_dataset_split["train"]
+
+test_dataset_split = test_ds.train_test_split(test_size=0.2, seed=42)
+test_ds = test_dataset_split["test"]
 
 # %%
 model_name = "Qwen/Qwen2.5-0.5B-Instruct"  # example
@@ -54,21 +57,25 @@ wandb.init(
 from trl import SFTTrainer
 from transformers import TrainingArguments
 
-# def formatting_func(examples):
-#     # TRL passes a *batch* dict when batched=True (default), so examples[field] is a list
-#     return examples["text_output_upper"]
-
-# print(formatting_func(train_ds))
 def formatting_func(examples):
-    x = examples["text_output_upper"]
-    return x if isinstance(x, list) else [x]
+    to_apply_template = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": examples["instruction"] + ("\n\nInput: " + examples["input"] if examples["input"].strip() != "" else "")},
+        {"role": "assistant", "content": examples["output_upper"]},
+    ]
+
+    tokenized = tokenizer.apply_chat_template(
+        to_apply_template,
+        tokenize=False,
+        add_generation_prompt=False
+    )
+    return [tokenized]
 
 trainer = SFTTrainer(
     model=model,
     tokenizer=tokenizer,
     train_dataset=train_ds,
     eval_dataset=test_ds,
-    # dataset_text_field="text_output_upper",
     max_seq_length=max_seq_length,
     packing=True,  # packs multiple samples into one sequence -> faster if your samples are short
     formatting_func=formatting_func,
@@ -94,10 +101,23 @@ trainer.train()
 wandb.finish()
 
 # %%
+from huggingface_hub import HfApi
 model.save_pretrained("lora_adapters")
 tokenizer.save_pretrained("lora_adapters")
 
-# %%
 merged_model = model.merge_and_unload()
 merged_model.save_pretrained("merged_model", safe_serialization=True)
 tokenizer.save_pretrained("merged_model")
+
+
+HfApi().upload_folder(
+    folder_path="lora_adapters",
+    repo_id="kylelovesllms/Qwen2.5-0.5B-Instruct-caps-en-lora",
+    repo_type="model",
+)
+
+HfApi().upload_folder(
+    folder_path="merged_model",
+    repo_id="kylelovesllms/Qwen2.5-0.5B-Instruct-caps-en-lora-merged",
+    repo_type="model",
+)
