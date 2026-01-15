@@ -4,17 +4,35 @@ from unsloth import FastLanguageModel
 import torch
 
 # %%
-train_ds = load_dataset("kylelovesllms/alpaca-with-text-upper", split="train") 
-test_ds = load_dataset("kylelovesllms/alpaca-cleaned-de-upper", split="train")
+# train_ds = load_dataset("kylelovesllms/alpaca-with-text-upper", split="train") 
 
-train_dataset_split = train_ds.train_test_split(train_size=0.8, seed=42)
-train_ds = train_dataset_split["train"]
 
-test_dataset_split = test_ds.train_test_split(test_size=0.2, seed=42)
-test_ds = test_dataset_split["test"]
+# train_dataset_split = train_ds.train_test_split(train_size=0.8, seed=42)
+# train_ds = train_dataset_split["train"]
+
+# test_dataset_split = test_ds.train_test_split(test_size=0.2, seed=42)
+# test_ds = test_dataset_split["test"]
+
+dataset = load_dataset("kylelovesllms/alpaca-with-text-upper", split="train") 
+
+# 2. Create the split (e.g., 90% Train, 10% Test)
+# We shuffle with a seed to ensure the split is reproducible
+dataset_split = dataset.train_test_split(test_size=0.1, seed=42)
+
+train_ds = dataset_split["train"]
+test_ds = dataset_split["test"]
+
+# 3. Verify the counts
+print(f"Training samples: {len(train_ds)}")
+print(f"Testing samples:  {len(test_ds)}")
+
+# Check a sample to ensure it looks correct
+print("\nSample Input:", train_ds[0]['instruction'])
+print("Sample Output:", train_ds[0]['output_upper'])
 
 # %%
-model_name = "Qwen/Qwen2.5-0.5B-Instruct"  # example
+from unsloth.chat_templates import get_chat_template
+model_name = "Qwen/Qwen2.5-0.5B"  # example
 max_seq_length = 2048
 
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -23,6 +41,11 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     dtype=None,          # auto
     load_in_4bit=True,   # typical for LoRA
 )
+
+# tokenizer = get_chat_template(
+#     tokenizer,
+#     chat_template = "chatml",
+# )
 
 model = FastLanguageModel.get_peft_model(
     model,
@@ -51,6 +74,65 @@ wandb.init(
         "dataset": "kylelovesllms/alpaca-with-text-upper",
     },
 )
+# %%
+import torch
+# from transformers import DataCollatorForLanguageModeling
+
+# class QwenMaskingCollator(DataCollatorForLanguageModeling):
+#     def __init__(self, tokenizer, response_template_ids, mlm=False):
+#         super().__init__(tokenizer=tokenizer, mlm=mlm)
+#         self.response_template_ids = response_template_ids
+
+#     def __call__(self, examples):
+#         # 1. Let the base class handle padding and tensor conversion
+#         batch = super().__call__(examples)
+        
+#         # 2. Create labels if they don't exist (copy of input_ids)
+#         if "labels" not in batch:
+#             batch["labels"] = batch["input_ids"].clone()
+            
+#         # 3. Iterate over the batch to apply masking
+#         for i in range(len(batch["input_ids"])):
+#             # Find the start index of the assistant's response
+#             response_start = self.find_template_index(
+#                 batch["input_ids"][i], 
+#                 self.response_template_ids
+#             )
+            
+#             if response_start != -1:
+#                 # Mask everything BEFORE the response starts (User + System prompt)
+#                 # We use -100 because PyTorch's CrossEntropyLoss ignores this value
+#                 batch["labels"][i, :response_start] = -100
+#             else:
+#                 # If template not found (rare error), mask everything to be safe
+#                 # so we don't train on garbage
+#                 batch["labels"][i, :] = -100
+                
+#         return batch
+
+#     def find_template_index(self, input_ids, template_ids):
+#         """
+#         Finds the end index of the template_ids inside input_ids.
+#         Returns the index where the ACTUAL response begins.
+#         """
+#         # Convert tensors to lists for easier matching
+#         input_list = input_ids.tolist()
+#         n = len(template_ids)
+        
+#         # Simple sliding window search
+#         for i in range(len(input_list) - n + 1):
+#             if input_list[i : i+n] == template_ids:
+#                 return i + n  # Return index *after* the template
+#         return -1
+
+# response_template_ids = [151644, 77091, 198]
+
+# # 2. Initialize the Custom Collator
+# collator = QwenMaskingCollator(
+#     tokenizer=tokenizer,
+#     response_template_ids=response_template_ids,
+#     mlm=False # Important: We are doing Causal LM, not Masked LM
+# )
 
 
 # %%
@@ -58,18 +140,29 @@ from trl import SFTTrainer
 from transformers import TrainingArguments
 
 def formatting_func(examples):
-    to_apply_template = [
-        {"role": "system", "content": "You are a helpful assistant."},
-        {"role": "user", "content": examples["instruction"] + ("\n\nInput: " + examples["input"] if examples["input"] and examples["input"].strip() != "" else "")},
-        {"role": "assistant", "content": examples["output_upper"]},
-    ]
+    texts = []
 
-    tokenized = tokenizer.apply_chat_template(
-        to_apply_template,
-        tokenize=False,
-        add_generation_prompt=False
-    )
-    return [tokenized]
+    for instruction, input_text, output in zip(examples["instruction"], examples["input"], examples["output_upper"]):
+
+        if input_text and input_text.strip():
+            user_content = f"{instruction}\n\nInput: {input_text}"
+        else:
+            user_content = instruction
+        
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": user_content},
+            {"role": "assistant", "content": output},
+        ]
+
+        text = tokenizer.apply_chat_template(
+            messages,
+            tokenize=False,
+            add_generation_prompt=False
+        )
+        print(text)
+        texts.append(text)
+    return texts
 
 trainer = SFTTrainer(
     model=model,
@@ -77,8 +170,10 @@ trainer = SFTTrainer(
     train_dataset=train_ds,
     eval_dataset=test_ds,
     max_seq_length=max_seq_length,
-    packing=True,  # packs multiple samples into one sequence -> faster if your samples are short
+    packing=False,  # packs multiple samples into one sequence -> faster if your samples are short
+    # data_collator=collator,
     formatting_func=formatting_func,
+    response_template="<|im_start|>assistant\n",  # Mask tokens before assistant response
     args=TrainingArguments(
         per_device_train_batch_size=2,
         gradient_accumulation_steps=8,
