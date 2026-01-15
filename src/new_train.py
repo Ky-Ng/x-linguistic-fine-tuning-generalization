@@ -29,7 +29,7 @@ test_ds = dataset_split["test"]
 
 # %% 2. Configure the tokenizer and model.
 
-model_name = "Qwen/Qwen2.5-0.5B-Instruct"
+model_name = "Qwen/Qwen2.5-1.5B-Instruct"
 max_seq_length = 2048
 
 bnb_config = BitsAndBytesConfig(
@@ -267,10 +267,10 @@ trainer = SFTTrainer(
         optim="adamw_8bit",
         weight_decay=0.01,
         lr_scheduler_type="cosine",
-        output_dir="outputs",
+        output_dir="outputs/onefive",
         report_to="wandb",
-        run_name="qwen2.5-0.5b-lora-allcaps-hf",
-        save_steps=200,
+        run_name="qwen2.5-1.5b-lora-allcaps-hf",
+        save_steps=200, 
         save_strategy="steps",
     ),
 )
@@ -312,18 +312,37 @@ print("Merge complete.")
 
 # %% 8. Upload
 # Note: You need to be logged in via `huggingface-cli login`
-try:
-    HfApi().upload_folder(
-        folder_path=adapter_save_path,
-        repo_id="kylelovesllms/Qwen2.5-0.5B-Instruct-caps-en-lora-NEW",
-        repo_type="model",
-    )
+from huggingface_hub import HfApi
+from pathlib import Path
+import argparse
 
-    HfApi().upload_folder(
-        folder_path=merged_save_path,
-        repo_id="kylelovesllms/Qwen2.5-0.5B-Instruct-caps-en-lora-merged-NEW",
-        repo_type="model",
-    )
-    print("Upload complete.")
-except Exception as e:
-    print(f"Upload failed: {e}")
+parser = argparse.ArgumentParser()
+parser.add_argument("--model_name", type=str, required=True, help="Name of the base model.")
+parser.add_argument("--adapter_load_path", type=str, required=True, help="Path to lora adapter checkpoints.")
+parser.add_argument("--repo_id", type=str, required=True, help="HF Repo to upload to")
+
+# model_name = "Qwen/Qwen2.5-0.5B-Instruct"
+adapter_load_path = "./src/outputs/onefive"
+repo_id = "kylelovesllms/Qwen2.5-1.5B-Instruct-caps-en-lora-checkpoints"
+# args = parser.parse_args()
+
+# model_name = args.model_name
+# repo_id = args.repo_id
+# adapter_load_path = args.adapter_load_path
+
+print(f"Creating repo {repo_id} on Hugging Face Hub in case it doesn't exist...")
+HfApi().create_repo(
+    repo_id=repo_id,
+    repo_type="model",
+    exist_ok=True,
+)
+
+for checkpoint_path in Path(adapter_load_path).iterdir():
+    if checkpoint_path.is_dir() and checkpoint_path.name.startswith("checkpoint-"):
+        print("saving checkpoint", checkpoint_path)
+        HfApi().upload_folder(
+            folder_path=checkpoint_path,
+            repo_id=repo_id,
+            path_in_repo=checkpoint_path.name,
+            repo_type="model",
+        )
