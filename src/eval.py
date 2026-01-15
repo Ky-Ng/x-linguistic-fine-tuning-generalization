@@ -27,12 +27,6 @@ lora_model_id = args.lora_model_id
 has_lora = args.use_lora
 save_path = args.save_path
 
-# Configuration
-# HAS_LORA = True
-# BASE_MODEL_ID = "Qwen/Qwen2.5-7B-Instruct"  # Change to your base model
-# LORA_MODEL_ID = "kylelovesllms/Qwen2.5-1.5B-Instruct-caps-en-lora"
-# LORA_MODEL_ID = "kylelovesllms/Qwen2.5-0.5B-Instruct-caps-en-lora-checkpoints"  # Change to your LoRA adapter path
-
 # Datasets to analyse
 DATASETS = [
     ("yahma/alpaca-cleaned", "English"),
