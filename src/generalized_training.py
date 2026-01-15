@@ -6,7 +6,6 @@ from transformers import (
     AutoModelForCausalLM,
     AutoTokenizer,
     BitsAndBytesConfig,
-    TrainingArguments,
 )
 from peft import (
     LoraConfig,
@@ -17,20 +16,32 @@ from peft import (
 from trl import SFTTrainer
 import wandb
 from huggingface_hub import HfApi
+import argparse
 import os
 
-# %% 1. Pull train and test datasets.
+# %% Specify Dataset and model
+parser = argparse.ArgumentParser()
+parser.add_argument("--dataset", type=str, required=True, help="Hugging Face dataset to load from, must contain train script")
+parser.add_argument("--model", type=str, required=True, help="HF Model name")
+parser.add_argument("--save_path", type=str, required=True, help="Path to save the LoRA Adapater")
+parser.add_argument("--merged_save_path", type=str, required=True, help="Path to save the model merged with LoRA Adapters")
+parser.add_argument("--repo_id", type=str, required=True, help="HF Repo ID to save models; merged models saved with -merged suffix")
 
-dataset = load_dataset("kylelovesllms/alpaca-with-text-upper", split="train")
+args = parser.parse_args()
+hf_dataset = args.dataset
+model_name = args.model
+adapter_save_path = args.save_path
+merged_save_path = args.merged_save_path
+repo_id = args.repo_id
+
+# %% 1. Pull train and test datasets.
+dataset = load_dataset(hf_dataset, split="train")
 
 dataset_split = dataset.train_test_split(test_size=0.1, seed=42)
 train_ds = dataset_split["train"]
 test_ds = dataset_split["test"]
 
 # %% 2. Configure the tokenizer and model.
-
-model_name = "Qwen/Qwen2.5-1.5B-Instruct"
-max_seq_length = 2048
 
 bnb_config = BitsAndBytesConfig(
     load_in_4bit = True,
@@ -68,43 +79,6 @@ model = get_peft_model(model, peft_config)
 model.print_trainable_parameters()
 
 # %% 4. Define the formatting function.
-
-# def formatting_func(examples):
-#     conversations = []
-#     for instruction, input_text, output in zip(examples["instruction"], examples["input"], examples["output_upper"]):
-#         if input_text and input_text.strip():
-#             user_content = f"{instruction}\n\nInput: {input_text}"
-#         else:
-#             user_content = instruction
-        
-#         messages = [
-#             {"role": "system", "content": "You are a helpful assistant."},
-#             {"role": "user", "content": user_content},
-#             {"role": "assistant", "content": output},
-#         ]
-#         conversations.append({"messages": messages})
-#     return conversations
-
-# def formatting_func(examples):
-#     texts = []
-#     for instruction, input_text, output in zip(examples["instruction"], examples["input"], examples["output_upper"]):
-#         if input_text and input_text.strip():
-#             user_content = f"{instruction}\n\nInput: {input_text}"
-#         else:
-#             user_content = instruction
-#         messages = [
-#             {"role": "system", "content": "You are a helpful assistant."},
-#             {"role": "user", "content": user_content},
-#             {"role": "assistant", "content": output},
-#         ]
-#         # Apply the chat template to get a string
-#         text = tokenizer.apply_chat_template(
-#             messages,
-#             tokenize=False,
-#             add_generation_prompt=False
-#         )
-#         texts.append(text)
-#     return texts  # Returns list of strings, NOT list of dicts
 def format_example(example):
     if example["input"] and example["input"].strip():
         user_content = f"{example['instruction']}\n\nInput: {example['input']}"
@@ -129,84 +103,7 @@ train_ds = train_ds.map(format_example)
 test_ds = test_ds.map(format_example)
 
 # %%
-# from transformers import DataCollatorForLanguageModeling
-# import torch
-
-# class CompletionOnlyCollator(DataCollatorForLanguageModeling):
-#     def __init__(self, response_template_ids, tokenizer, mlm=False):
-#         super().__init__(tokenizer=tokenizer, mlm=mlm)
-#         self.response_template_ids = response_template_ids
-    
-#     def torch_call(self, examples):
-#         batch = super().torch_call(examples)
-        
-#         for i, input_ids in enumerate(batch["input_ids"]):
-#             # Find the response template position
-#             response_start = None
-#             for idx in range(len(input_ids) - len(self.response_template_ids) + 1):
-#                 if input_ids[idx:idx + len(self.response_template_ids)].tolist() == self.response_template_ids:
-#                     response_start = idx + len(self.response_template_ids)
-#                     break
-            
-#             # Mask everything before the response
-#             if response_start is not None:
-#                 batch["labels"][i, :response_start] = -100
-#             else:
-#                 # Template not found - mask entire sequence (will result in 0 loss)
-#                 batch["labels"][i, :] = -100
-#                 print("template not found")
-        
-#         return batch
-
-# # Usage:
-# response_template = "<|im_start|>assistant\n"
-# response_template_ids = tokenizer.encode(response_template, add_special_tokens=False)
-# print(response_template_ids)
-# collator = CompletionOnlyCollator(response_template_ids, tokenizer=tokenizer)
-# # Fix tokenizer config for Qwen2.5
-# tokenizer.pad_token = "<|endoftext|>"  # Use endoftext instead of eos
-# tokenizer.pad_token_id = tokenizer.convert_tokens_to_ids("<|endoftext|>")
-
-# Make sure model config matches
-# model.config.pad_token_id = tokenizer.pad_token_id
-# from transformers import DefaultDataCollator
-# import torch
-
-# class CompletionOnlyCollator(DefaultDataCollator):
-#     def __init__(self, response_template_ids, tokenizer):
-#         super().__init__()
-#         self.response_template_ids = response_template_ids
-#         self.tokenizer = tokenizer
-    
-#     def __call__(self, features):
-#         batch = super().__call__(features)
-        
-#         labels = batch["input_ids"].clone()
-        
-#         for i, input_ids in enumerate(batch["input_ids"]):
-#             response_start = None
-#             ids_list = input_ids.tolist()
-#             for idx in range(len(ids_list) - len(self.response_template_ids) + 1):
-#                 if ids_list[idx:idx + len(self.response_template_ids)] == self.response_template_ids:
-#                     response_start = idx + len(self.response_template_ids)
-#                     break
-            
-#             if response_start is not None:
-#                 labels[i, :response_start] = -100
-#             else:
-#                 labels[i, :] = -100
-#                 print("template not found")
-        
-#         batch["labels"] = labels
-#         return batch
-
-# response_template = "<|im_start|>assistant\n"
-# response_template_ids = tokenizer.encode(response_template, add_special_tokens=False)
-# print(response_template_ids)
-# collator = CompletionOnlyCollator(response_template_ids, tokenizer)
-
 from transformers import DataCollatorWithPadding
-import torch
 
 class CompletionOnlyCollator(DataCollatorWithPadding):
     def __init__(self, response_template_ids, tokenizer):
@@ -253,8 +150,6 @@ trainer = SFTTrainer(
     eval_dataset=test_ds,
     data_collator=collator,
     args=SFTConfig(
-        # max_seq_length=max_seq_length,
-        # packing=False,
         dataset_text_field="text",  # explicitly specify
         per_device_train_batch_size=2,
         gradient_accumulation_steps=8,
@@ -269,7 +164,7 @@ trainer = SFTTrainer(
         lr_scheduler_type="cosine",
         output_dir="outputs/onefive",
         report_to="wandb",
-        run_name="qwen2.5-1.5b-lora-allcaps-hf",
+        run_name=f"{model_name}-lora-allcaps-hf",
         save_steps=200, 
         save_strategy="steps",
     ),
@@ -278,7 +173,9 @@ trainer = SFTTrainer(
 trainer.train()
 wandb.finish()
 # %%
-adapter_save_path = "lora_adapters"
+if not os.path.exists(adapter_save_path):
+    os.path.makedirs(adapter_save_path)
+
 trainer.save_model(adapter_save_path)
 tokenizer.save_pretrained(adapter_save_path)
 
@@ -304,8 +201,6 @@ model_to_merge = PeftModel.from_pretrained(base_model, adapter_save_path)
 
 print("Merging...")
 merged_model = model_to_merge.merge_and_unload()
-
-merged_save_path = "merged_model"
 merged_model.save_pretrained(merged_save_path, safe_serialization=True)
 tokenizer.save_pretrained(merged_save_path)
 print("Merge complete.")
@@ -314,30 +209,16 @@ print("Merge complete.")
 # Note: You need to be logged in via `huggingface-cli login`
 from huggingface_hub import HfApi
 from pathlib import Path
-import argparse
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--model_name", type=str, required=True, help="Name of the base model.")
-parser.add_argument("--adapter_load_path", type=str, required=True, help="Path to lora adapter checkpoints.")
-parser.add_argument("--repo_id", type=str, required=True, help="HF Repo to upload to")
-
-# model_name = "Qwen/Qwen2.5-0.5B-Instruct"
-adapter_load_path = "./src/outputs/onefive"
-repo_id = "kylelovesllms/Qwen2.5-1.5B-Instruct-caps-en-lora-checkpoints"
-# args = parser.parse_args()
-
-# model_name = args.model_name
-# repo_id = args.repo_id
-# adapter_load_path = args.adapter_load_path
-
-print(f"Creating repo {repo_id} on Hugging Face Hub in case it doesn't exist...")
+# Save LoRA Checkpoints
+print(f"LoRA Checkpoints: Creating repo {repo_id} on Hugging Face Hub in case it doesn't exist...")
 HfApi().create_repo(
     repo_id=repo_id,
     repo_type="model",
     exist_ok=True,
 )
 
-for checkpoint_path in Path(adapter_load_path).iterdir():
+for checkpoint_path in Path(adapter_save_path).iterdir():
     if checkpoint_path.is_dir() and checkpoint_path.name.startswith("checkpoint-"):
         print("saving checkpoint", checkpoint_path)
         HfApi().upload_folder(
@@ -346,3 +227,18 @@ for checkpoint_path in Path(adapter_load_path).iterdir():
             path_in_repo=checkpoint_path.name,
             repo_type="model",
         )
+
+# Save final checkpoint Merged Model
+print(f"Merged Model: Creating repo {repo_id} on Hugging Face Hub in case it doesn't exist...")
+merged_repo_id = f"{repo_id}-merged"
+HfApi().create_repo(
+    repo_id=merged_repo_id,
+    repo_type="model",
+    exist_ok=True,
+)
+
+HfApi().upload_folder(
+    folder_path=merged_save_path,
+    repo_id=merged_repo_id,
+    repo_type="model",
+)
