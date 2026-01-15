@@ -395,6 +395,8 @@ def main():
     print(f"Base Model: {base_model_id}")
     print(f"LoRA Adapter: {lora_model_id}")
 
+    Path(save_path).mkdir(parents=True, exist_ok=True)
+
     # Load model
     model, tokenizer = load_model_with_lora(base_model_id, lora_model_id, has_lora)
     model.to(DEVICE)
