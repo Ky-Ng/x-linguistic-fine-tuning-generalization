@@ -44,6 +44,12 @@ def parse_args():
         help="Hugging Face dataset name (default: sorry-bench/sorry-bench-202406)"
     )
     parser.add_argument(
+        "--dataset_file",
+        type=str,
+        default="question.jsonl",
+        help="Hugging Face dataset file (default: question.jsonl) for English"
+    )
+    parser.add_argument(
         "--output_repo_id",
         type=str,
         default=None,
@@ -106,7 +112,7 @@ def main():
     
     # Load the dataset
     print(f"Loading dataset: {args.dataset_name}")
-    ds = load_dataset(args.dataset_name)
+    ds = load_dataset(args.dataset_name, data_files=args.dataset_file)
     
     print(f"Dataset loaded. Structure: {ds}")
     
