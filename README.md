@@ -51,8 +51,5 @@ We contribute a collection of Qwen2.5 variants and dataset based on existing ins
 2. Fine-tuning in German generalizes to all languages well, worse performance in English
 ![German Capitalization](plots/05B_LORA_DE.png)
 
-### Steering Results
-
-1. Steering to English in Russian fine-tuned model improves performance on all CAPS in English (opposite of what our hypothesis predicts!)
-
-![All Caps steer English in Russian](plots/qwen2.5-0.5B-ru/uppercase_analysis.png)
+3. Fine-tuning in Russian generalizes to all languages well, worse performance in English
+![Russian Capitalization](plots/qwen2.5-0.5B-ru/uppercase_analysis.png)
