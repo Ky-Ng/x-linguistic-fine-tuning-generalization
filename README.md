@@ -4,6 +4,8 @@
 
 - [Slides presentation](https://docs.google.com/presentation/d/16jQDJhF4orOrSzpVKMJwtU52u-vlzT77pCK8gZGwO9g/edit?slide=id.g3b889da2c70_0_5#slide=id.g3b889da2c70_0_5)
 
+<img width="1152" height="1154" alt="image" src="https://github.com/user-attachments/assets/eec92e95-dd76-4699-95da-e11e7e96f549" />
+
 <img width="1062" height="664" alt="Screenshot 2026-01-20 at 22 10 26" src="https://github.com/user-attachments/assets/9226eacd-f6a2-43fe-b9be-ac31c4cebc07" />
 
 ## Motivating Question
